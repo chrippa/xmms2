@@ -1,0 +1,23 @@
+from waflib import Errors
+from waftools.plugin import plugin
+
+source = """
+../../../tests/utils/jsonism.c
+../../../tests/utils/json.c
+googlemusic.c
+""".split()
+
+def plugin_configure(conf):
+    try:
+        conf.check_cfg(package="libcurl", uselib_store="curl",
+                args="--cflags --libs")
+    except Errors.ConfigurationError:
+        conf.check_cfg(path="curl-config", package="", uselib_store="curl",
+                args="--cflags --libs")
+
+def plugin_build(bld, obj):
+	obj.includes += " ../../../tests/utils ../../../tests"
+
+configure, build = plugin("googlemusic", configure=plugin_configure,
+                          build=plugin_build, source=source, libs=["curl"])
+
