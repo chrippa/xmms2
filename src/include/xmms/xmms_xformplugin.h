@@ -426,6 +426,8 @@ void xmms_xform_browse_add_entry_property_int (xmms_xform_t *xform,
 void xmms_xform_browse_add_symlink (xmms_xform_t *xform, const gchar *basename, const gchar *url);
 void xmms_xform_browse_add_symlink_args (xmms_xform_t *xform, const gchar *basename, const gchar *url, gint nargs, char **args);
 
+gboolean xmms_xform_isrehash (xmms_xform_t *xform);
+
 #define XMMS_XFORM_MAX_LINE_SIZE 1024
 
 /**

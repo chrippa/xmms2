@@ -118,7 +118,7 @@ xmms_ringbuf_xform_new (xmms_xform_t *prev, xmms_medialib_t *medialib, xmms_medi
 {
 	xmms_xform_t *xform;
 
-	xform = xmms_xform_new (ringbuf_plugin, prev, medialib, entry, gt);
+	xform = xmms_xform_new (ringbuf_plugin, prev, medialib, entry, gt, FALSE);
 
 	return xform;
 }

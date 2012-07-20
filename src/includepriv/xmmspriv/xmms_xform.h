@@ -26,7 +26,7 @@ typedef struct xmms_xform_object_St xmms_xform_object_t;
 
 xmms_xform_object_t *xmms_xform_object_init (void);
 
-xmms_xform_t *xmms_xform_new (xmms_xform_plugin_t *plugin, xmms_xform_t *prev, xmms_medialib_t *medialib, xmms_medialib_entry_t entry, GList *goal_hints);
+xmms_xform_t *xmms_xform_new (xmms_xform_plugin_t *plugin, xmms_xform_t *prev, xmms_medialib_t *medialib, xmms_medialib_entry_t entry, GList *goal_hints, gboolean rehash);
 const gchar *xmms_xform_outtype_get_str (xmms_xform_t *xform, xmms_stream_type_key_t key);
 gint xmms_xform_outtype_get_int (xmms_xform_t *xform, xmms_stream_type_key_t key);
 xmms_stream_type_t *xmms_xform_outtype_get (xmms_xform_t *xform);
@@ -51,6 +51,8 @@ GList *xmms_xform_browse (const gchar *url, xmms_error_t *error);
 GList *xmms_xform_browse_method (xmms_xform_t *xform, const gchar *url, xmms_error_t *error);
 
 const char *xmms_xform_indata_find_str (xmms_xform_t *xform, xmms_stream_type_key_t key);
+
+gboolean xmms_xform_isrehash (xmms_xform_t *xform);
 
 #define XMMS_XFORM_BUILTIN(shname, name, ver, desc, setupfunc) XMMS_BUILTIN(XMMS_PLUGIN_TYPE_XFORM, XMMS_XFORM_API_VERSION, shname, name, ver, desc, (gboolean (*)(gpointer))setupfunc)
 

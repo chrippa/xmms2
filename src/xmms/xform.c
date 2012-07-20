@@ -45,6 +45,7 @@ struct xmms_xform_St {
 	xmms_medialib_t *medialib;
 
 	gboolean inited;
+	gboolean rehash;
 
 	void *priv;
 
@@ -88,7 +89,7 @@ typedef struct xmms_xform_hotspot_St {
 
 
 xmms_xform_t *xmms_xform_find (xmms_xform_t *prev, xmms_medialib_entry_t entry,
-                               GList *goal_hints);
+                               GList *goal_hints, gboolean rehash);
 const char *xmms_xform_shortname (xmms_xform_t *xform);
 static xmms_xform_t *add_effects (xmms_xform_t *last,
                                   xmms_medialib_entry_t entry,
@@ -283,7 +284,7 @@ xmms_xform_browse (const gchar *url, xmms_error_t *error)
 	xmms_xform_t *xform = NULL;
 	xmms_xform_t *xform2 = NULL;
 
-	xform = xmms_xform_new (NULL, NULL, NULL, 0, NULL);
+	xform = xmms_xform_new (NULL, NULL, NULL, 0, NULL, FALSE);
 
 	durl = g_strdup (url);
 	xmms_medialib_decode_url (durl);
@@ -296,7 +297,7 @@ xmms_xform_browse (const gchar *url, xmms_error_t *error)
 	                             durl,
 	                             XMMS_STREAM_TYPE_END);
 
-	xform2 = xmms_xform_find (xform, 0, NULL);
+	xform2 = xmms_xform_find (xform, 0, NULL, FALSE);
 	if (xform2) {
 		XMMS_DBG ("found xform %s", xmms_xform_shortname (xform2));
 	} else {
@@ -376,7 +377,7 @@ xmms_xform_destroy (xmms_object_t *object)
 xmms_xform_t *
 xmms_xform_new (xmms_xform_plugin_t *plugin, xmms_xform_t *prev,
                 xmms_medialib_t *medialib, xmms_medialib_entry_t entry,
-                GList *goal_hints)
+                GList *goal_hints, gboolean rehash)
 {
 	xmms_xform_t *xform;
 
@@ -387,6 +388,7 @@ xmms_xform_new (xmms_xform_plugin_t *plugin, xmms_xform_t *prev,
 	xform->entry = entry;
 	xform->medialib = medialib;
 	xform->goal_hints = goal_hints;
+	xform->rehash = rehash;
 	xform->lr.bufend = &xform->lr.buf[0];
 
 	if (prev) {
@@ -1191,7 +1193,7 @@ xmms_xform_match (xmms_plugin_t *plugin, gpointer user_data)
 
 xmms_xform_t *
 xmms_xform_find (xmms_xform_t *prev, xmms_medialib_entry_t entry,
-                 GList *goal_hints)
+                 GList *goal_hints, gboolean rehash)
 {
 	match_state_t state;
 	xmms_xform_t *xform = NULL;
@@ -1203,7 +1205,7 @@ xmms_xform_find (xmms_xform_t *prev, xmms_medialib_entry_t entry,
 	xmms_plugin_foreach (XMMS_PLUGIN_TYPE_XFORM, xmms_xform_match, &state);
 
 	if (state.match) {
-		xform = xmms_xform_new (state.match, prev, prev->medialib, entry, goal_hints);
+		xform = xmms_xform_new (state.match, prev, prev->medialib, entry, goal_hints, rehash);
 	} else {
 		XMMS_DBG ("Found no matching plugin...");
 	}
@@ -1299,7 +1301,7 @@ outdata_type_metadata_collect (xmms_xform_t *xform)
 
 static xmms_xform_t *
 chain_setup (xmms_medialib_t *medialib, xmms_medialib_entry_t entry,
-             const gchar *url, GList *goal_formats)
+             const gchar *url, GList *goal_formats, gboolean rehash)
 {
 	xmms_xform_t *xform, *last;
 	gchar *durl, *args;
@@ -1308,7 +1310,7 @@ chain_setup (xmms_medialib_t *medialib, xmms_medialib_entry_t entry,
 		entry = 1; /* FIXME: this is soooo ugly, don't do this */
 	}
 
-	xform = xmms_xform_new (NULL, NULL, medialib , 0, goal_formats);
+	xform = xmms_xform_new (NULL, NULL, medialib , 0, goal_formats, rehash);
 
 	durl = g_strdup (url);
 
@@ -1346,7 +1348,7 @@ chain_setup (xmms_medialib_t *medialib, xmms_medialib_entry_t entry,
 	last = xform;
 
 	do {
-		xform = xmms_xform_find (last, entry, goal_formats);
+		xform = xmms_xform_find (last, entry, goal_formats, rehash);
 		if (!xform) {
 			xmms_log_error ("Couldn't set up chain for '%s' (%d)",
 			                url, entry);
@@ -1440,7 +1442,7 @@ xmms_xform_chain_setup_url_session (xmms_medialib_t *medialib,
 	gboolean add_segment = FALSE;
 	gint priority;
 
-	last = chain_setup (medialib, entry, url, goal_formats);
+	last = chain_setup (medialib, entry, url, goal_formats, rehash);
 	if (!last) {
 		return NULL;
 	}
@@ -1504,6 +1506,12 @@ xmms_xform_config_lookup (xmms_xform_t *xform, const gchar *path)
 	return xmms_plugin_config_lookup ((xmms_plugin_t *) xform->plugin, path);
 }
 
+gboolean
+xmms_xform_isrehash (xmms_xform_t *xform)
+{
+	return xform->rehash;
+}
+
 static xmms_xform_t *
 add_effects (xmms_xform_t *last, xmms_medialib_entry_t entry,
              GList *goal_formats)
@@ -1557,7 +1565,7 @@ xmms_xform_new_effect (xmms_xform_t *last, xmms_medialib_entry_t entry,
 		return last;
 	}
 
-	xform = xmms_xform_new (xform_plugin, last, last->medialib, entry, goal_formats);
+	xform = xmms_xform_new (xform_plugin, last, last->medialib, entry, goal_formats, FALSE);
 
 	if (xform) {
 		xmms_object_unref (last);
