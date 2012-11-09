@@ -38,6 +38,7 @@ struct xmms_xform_object_St {
 struct xmms_xform_St {
 	xmms_object_t obj;
 	struct xmms_xform_St *prev;
+	struct xmms_xform_St *next;
 
 	const xmms_xform_plugin_t *plugin;
 	xmms_medialib_entry_t entry;
@@ -84,6 +85,11 @@ typedef struct xmms_xform_hotspot_St {
 	xmmsv_t *obj;
 } xmms_xform_hotspot_t;
 
+typedef struct xmms_xform_metadata_St {
+	gchar *key;
+	gboolean _volatile;
+} xmms_xform_metadata_key_t;
+
 #define READ_CHUNK 4096
 
 
@@ -99,6 +105,13 @@ static xmms_xform_t *xmms_xform_new_effect (xmms_xform_t* last,
                                             const gchar *name);
 static void xmms_xform_destroy (xmms_object_t *object);
 static void effect_callbacks_init (void);
+
+static xmms_xform_metadata_key_t * xmms_xform_metadata_key_new (const gchar *key,
+                                                              gboolean _volatile);
+static void xmms_xform_metadata_key_destroy (xmms_xform_metadata_key_t *mkey);
+static gboolean metadata_key_equal (const xmms_xform_metadata_key_t *a,
+                                    const xmms_xform_metadata_key_t *b);
+static guint metadata_key_hash (const xmms_xform_metadata_key_t *mkey);
 
 static xmmsv_t *xmms_xform_client_browse (xmms_xform_object_t *obj, const gchar *url, xmms_error_t *error);
 
@@ -369,9 +382,9 @@ xmms_xform_destroy (xmms_object_t *object)
 	xmms_object_unref (xform->plugin);
 
 	if (xform->prev) {
+		xform->prev->next = NULL;
 		xmms_object_unref (xform->prev);
 	}
-
 }
 
 xmms_xform_t *
@@ -393,10 +406,12 @@ xmms_xform_new (xmms_xform_plugin_t *plugin, xmms_xform_t *prev,
 	if (prev) {
 		xmms_object_ref (prev);
 		xform->prev = prev;
+		prev->next = xform;
 	}
 
-	xform->metadata = g_hash_table_new_full (g_str_hash, g_str_equal,
-	                                         g_free,
+	xform->metadata = g_hash_table_new_full ((GHashFunc) metadata_key_hash,
+	                                         (GEqualFunc) metadata_key_equal,
+	                                         (GDestroyNotify) xmms_xform_metadata_key_destroy,
 	                                         (GDestroyNotify) xmmsv_unref);
 
 	xform->privdata = g_hash_table_new_full (g_str_hash, g_str_equal,
@@ -517,18 +532,36 @@ xmms_xform_metadata_mapper_match (xmms_xform_t *xform, const gchar *key, const g
 	return xmms_xform_plugin_metadata_mapper_match (xform->plugin, xform, key, value, length);
 }
 
-gboolean
-xmms_xform_metadata_set_int (xmms_xform_t *xform, const char *key, int val)
+static xmms_xform_metadata_key_t *
+xmms_xform_metadata_key_new (const gchar *key, gboolean _volatile) {
+	xmms_xform_metadata_key_t *mkey;
+
+	mkey = g_new0 (xmms_xform_metadata_key_t, 1);
+	mkey->key = g_strdup (key);
+	mkey->_volatile = _volatile;
+
+	return mkey;
+}
+
+static void
+xmms_xform_metadata_key_destroy (xmms_xform_metadata_key_t *mkey) {
+	g_free (mkey->key);
+	g_free (mkey);
+}
+
+static gboolean
+xmms_xform_metadata_set_int_full (xmms_xform_t *xform, const char *key, int val, 
+                                  gboolean _volatile)
 {
-	g_hash_table_insert (xform->metadata, g_strdup (key),
+	g_hash_table_insert (xform->metadata, xmms_xform_metadata_key_new (key, _volatile),
 	                     xmmsv_new_int (val));
 	xform->metadata_changed = TRUE;
 	return TRUE;
 }
 
-gboolean
-xmms_xform_metadata_set_str (xmms_xform_t *xform, const char *key,
-                             const char *val)
+static gboolean
+xmms_xform_metadata_set_str_full (xmms_xform_t *xform, const char *key,
+                                  const char *val, gboolean _volatile)
 {
 	const char *old;
 
@@ -543,7 +576,7 @@ xmms_xform_metadata_set_str (xmms_xform_t *xform, const char *key,
 		}
 	}
 
-	g_hash_table_insert (xform->metadata, g_strdup (key),
+	g_hash_table_insert (xform->metadata, xmms_xform_metadata_key_new (key, _volatile),
 	                     xmmsv_new_string (val));
 
 	xform->metadata_changed = TRUE;
@@ -552,18 +585,75 @@ xmms_xform_metadata_set_str (xmms_xform_t *xform, const char *key,
 }
 
 static const xmmsv_t *
-xmms_xform_metadata_get_val (xmms_xform_t *xform, const char *key)
+xmms_xform_metadata_get_val_full (xmms_xform_t *xform, const char *key,
+                                  gboolean _volatile)
 {
+	xmms_xform_metadata_key_t *mkey;
 	xmmsv_t *val = NULL;
 
+	mkey = xmms_xform_metadata_key_new (key, _volatile);
+
 	for (; xform; xform = xform->prev) {
-		val = g_hash_table_lookup (xform->metadata, key);
+		val = g_hash_table_lookup (xform->metadata, mkey);
 		if (val) {
 			break;
 		}
 	}
 
+	xmms_xform_metadata_key_destroy (mkey);
+
 	return val;
+}
+
+static gboolean
+xmms_xform_metadata_get_int_full (xmms_xform_t *xform, const char *key,
+                                  gint32 *val, gboolean _volatile)
+{
+	const xmmsv_t *obj;
+	gboolean ret = FALSE;
+
+	obj = xmms_xform_metadata_get_val_full (xform, key, _volatile);
+	if (obj && xmmsv_get_type (obj) == XMMSV_TYPE_INT32) {
+		xmmsv_get_int (obj, val);
+		ret = TRUE;
+	}
+
+	return ret;
+}
+
+static gboolean
+xmms_xform_metadata_get_str_full (xmms_xform_t *xform, const char *key,
+                                  const gchar **val, gboolean _volatile)
+{
+	const xmmsv_t *obj;
+	gboolean ret = FALSE;
+
+	obj = xmms_xform_metadata_get_val_full (xform, key, _volatile);
+	if (obj && xmmsv_get_type (obj) == XMMSV_TYPE_STRING) {
+		xmmsv_get_string (obj, val);
+		ret = TRUE;
+	}
+
+	return ret;
+}
+
+gboolean
+xmms_xform_metadata_set_int (xmms_xform_t *xform, const char *key, int val)
+{
+	return xmms_xform_metadata_set_int_full (xform, key, val, FALSE);
+}
+
+gboolean
+xmms_xform_metadata_set_str (xmms_xform_t *xform, const char *key,
+                             const char *val)
+{
+	return xmms_xform_metadata_set_str_full (xform, key, val, FALSE);
+}
+
+static const xmmsv_t *
+xmms_xform_metadata_get_val (xmms_xform_t *xform, const char *key)
+{
+	return xmms_xform_metadata_get_val_full (xform, key, FALSE);
 }
 
 gboolean
@@ -576,37 +666,72 @@ gboolean
 xmms_xform_metadata_get_int (xmms_xform_t *xform, const char *key,
                              gint32 *val)
 {
-	const xmmsv_t *obj;
-	gboolean ret = FALSE;
-
-	obj = xmms_xform_metadata_get_val (xform, key);
-	if (obj && xmmsv_get_type (obj) == XMMSV_TYPE_INT32) {
-		xmmsv_get_int (obj, val);
-		ret = TRUE;
-	}
-
-	return ret;
+	return xmms_xform_metadata_get_int_full (xform, key, val, FALSE);
 }
 
 gboolean
 xmms_xform_metadata_get_str (xmms_xform_t *xform, const char *key,
                              const gchar **val)
 {
-	const xmmsv_t *obj;
-	gboolean ret = FALSE;
+	return xmms_xform_metadata_get_str_full (xform, key, val, FALSE);
+}
 
-	obj = xmms_xform_metadata_get_val (xform, key);
-	if (obj && xmmsv_get_type (obj) == XMMSV_TYPE_STRING) {
-		xmmsv_get_string (obj, val);
-		ret = TRUE;
-	}
+gboolean
+xmms_xform_volatile_metadata_set_int (xmms_xform_t *xform, const char *key, int val)
+{
+	return xmms_xform_metadata_set_int_full (xform, key, val, TRUE);
+}
 
-	return ret;
+gboolean
+xmms_xform_volatile_metadata_set_str (xmms_xform_t *xform, const char *key,
+                             const char *val)
+{
+	return xmms_xform_metadata_set_str_full (xform, key, val, TRUE);
+}
+
+static const xmmsv_t *
+xmms_xform_volatile_metadata_get_val (xmms_xform_t *xform, const char *key)
+{
+	return xmms_xform_metadata_get_val_full (xform, key, TRUE);
+}
+
+gboolean
+xmms_xform_volatile_metadata_has_val (xmms_xform_t *xform, const gchar *key)
+{
+	return !!xmms_xform_volatile_metadata_get_val (xform, key);
+}
+
+gboolean
+xmms_xform_volatile_metadata_get_int (xmms_xform_t *xform, const char *key,
+                                      gint32 *val)
+{
+	return xmms_xform_metadata_get_int_full (xform, key, val, TRUE);
+}
+
+gboolean
+xmms_xform_volatile_metadata_get_str (xmms_xform_t *xform, const char *key,
+                                      const gchar **val)
+{
+	return xmms_xform_metadata_get_str_full (xform, key, val, TRUE);
+}
+
+static gboolean
+metadata_key_equal (const xmms_xform_metadata_key_t *a,
+                    const xmms_xform_metadata_key_t *b)
+{
+	return g_str_equal (a->key, b->key) && a->_volatile == b->_volatile;
+}
+
+static guint
+metadata_key_hash (const xmms_xform_metadata_key_t *mkey)
+{
+	return g_str_hash (mkey->key);
 }
 
 typedef struct {
 	xmms_medialib_entry_t entry;
 	xmms_medialib_session_t *session;
+	xmmsv_t *info;
 	gchar *source;
 } metadata_festate_t;
 
@@ -614,27 +739,45 @@ static void
 add_metadatum (gpointer _key, gpointer _value, gpointer user_data)
 {
 	xmmsv_t *value = (xmmsv_t *) _value;
-	gchar *key = (gchar *) _key;
+	xmms_xform_metadata_key_t *key = (xmms_xform_metadata_key_t *) _key;
 	metadata_festate_t *st = (metadata_festate_t *) user_data;
 
-	if (xmmsv_get_type (value) == XMMSV_TYPE_STRING) {
-		const gchar *s;
-		xmmsv_get_string (value, &s);
-		xmms_medialib_entry_property_set_str_source (st->session,
-		                                             st->entry,
-		                                             key,
-		                                             s,
-		                                             st->source);
-	} else if (xmmsv_get_type (value) == XMMSV_TYPE_INT32) {
-		gint i;
-		xmmsv_get_int (value, &i);
-		xmms_medialib_entry_property_set_int_source (st->session,
-		                                             st->entry,
-		                                             key,
-		                                             i,
-		                                             st->source);
-	} else {
-		XMMS_DBG ("Unknown type?!?");
+	if (st->session && !key->_volatile) {
+		if (xmmsv_get_type (value) == XMMSV_TYPE_STRING) {
+			const gchar *s;
+			xmmsv_get_string (value, &s);
+			xmms_medialib_entry_property_set_str_source (st->session,
+			                                             st->entry,
+			                                             key->key,
+			                                             s,
+			                                             st->source);
+		} else if (xmmsv_get_type (value) == XMMSV_TYPE_INT32) {
+			gint i;
+			xmmsv_get_int (value, &i);
+			xmms_medialib_entry_property_set_int_source (st->session,
+			                                             st->entry,
+			                                             key->key,
+			                                             i,
+			                                             st->source);
+		} else {
+			XMMS_DBG ("Unknown type?!?");
+		}
+	}
+
+	if (st->info && xmmsv_is_type (st->info, XMMSV_TYPE_DICT)) {
+		xmmsv_t *entry;
+		gchar vsrc[XMMS_PLUGIN_SHORTNAME_MAX_LEN + 18];
+
+		g_snprintf (vsrc, sizeof (vsrc), "volatile/%s",
+		            st->source);
+
+		if (!xmmsv_dict_get (st->info, key->key, &entry)) {
+			entry = xmmsv_new_dict ();
+			xmmsv_dict_set (st->info, key->key, entry);
+			xmmsv_unref (entry);
+		}
+
+		xmmsv_dict_set (entry, key->_volatile ? vsrc : st->source, value);
 	}
 }
 
@@ -678,6 +821,23 @@ xmms_xform_metadata_collect_r (xmms_xform_t *xform, metadata_festate_t *info,
 }
 
 static void
+xmms_xform_current_metadata_collect_r (xmms_xform_t *xform, metadata_festate_t *info)
+{
+	gchar src[XMMS_PLUGIN_SHORTNAME_MAX_LEN + 8];
+
+	if (xform->prev) {
+		xmms_xform_current_metadata_collect_r (xform->prev, info);
+	}
+
+	g_snprintf (src, sizeof (src), "plugin/%s",
+	            xmms_xform_shortname (xform));
+
+	info->source = src;
+	g_hash_table_foreach (xform->metadata, add_metadatum, info);
+	info->source = NULL;
+}
+
+static void
 xmms_xform_metadata_collect (xmms_medialib_session_t *session,
                              xmms_xform_t *start, GString *namestr,
                              gboolean rehashing)
@@ -688,8 +848,9 @@ xmms_xform_metadata_collect (xmms_medialib_session_t *session,
 	GTimeVal now;
 
 	info.entry = start->entry;
-
+	info.info = NULL;
 	info.session = session;
+
 	times_played = xmms_medialib_entry_property_get_int (session, info.entry,
 	                                                     XMMS_MEDIALIB_ENTRY_PROPERTY_TIMESPLAYED);
 
@@ -731,6 +892,7 @@ static void
 xmms_xform_metadata_update (xmms_xform_t *xform)
 {
 	xmms_medialib_session_t *session;
+	xmmsv_t *metadata;
 	metadata_festate_t info;
 
 	g_return_if_fail (xform->medialib);
@@ -740,10 +902,31 @@ xmms_xform_metadata_update (xmms_xform_t *xform)
 
 		info.entry = xform->entry;
 		info.session = session;
+		info.info = NULL;
 
 		xmms_xform_metadata_collect_one (xform, &info);
 	} while (!xmms_medialib_session_commit (session));
+
+	xmms_xform_current_metadata_get (xform, &metadata);
+	xmms_object_emit (XMMS_OBJECT (xform),
+	                  XMMS_IPC_SIGNAL_XFORM_METADATA_UPDATE,
+	                  metadata);
 }
+
+void
+xmms_xform_current_metadata_get (xmms_xform_t *xform, xmmsv_t **info)
+{
+	metadata_festate_t st;
+
+	st.session = NULL;
+	st.info = xmmsv_new_dict ();
+
+	xmms_xform_current_metadata_collect_r (xmms_xform_chain_end (xform),
+                                           &st);
+
+	*info = st.info;
+}
+
 
 static void
 xmms_xform_auxdata_set_val (xmms_xform_t *xform, char *key, xmmsv_t *val)
@@ -1239,6 +1422,49 @@ xmms_xform_goal_hints_get (xmms_xform_t *xform)
 	return xform->goal_hints;
 }
 
+xmms_xform_t *
+xmms_xform_chain_prev (xmms_xform_t *xform)
+{
+	g_return_val_if_fail (xform, NULL);
+
+	return xform->prev;
+}
+
+xmms_xform_t *
+xmms_xform_chain_next (xmms_xform_t *xform)
+{
+	g_return_val_if_fail (xform, NULL);
+
+	return xform->next;
+}
+
+xmms_xform_t *
+xmms_xform_chain_start (xmms_xform_t *xform)
+{
+	xmms_xform_t *start;
+
+	g_return_val_if_fail (xform, NULL);
+
+	for (; xform; xform = xform->prev) {
+		start = xform;
+	}
+
+	return start;
+}
+
+xmms_xform_t *
+xmms_xform_chain_end (xmms_xform_t *xform)
+{
+	xmms_xform_t *end;
+
+	g_return_val_if_fail (xform, NULL);
+
+	for (; xform; xform = xform->next) {
+		end = xform;
+	}
+
+	return end;
+}
 
 static gboolean
 has_goalformat (xmms_xform_t *xform, GList *goal_formats)

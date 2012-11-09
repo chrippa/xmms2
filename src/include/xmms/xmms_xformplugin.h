@@ -268,6 +268,20 @@ gboolean xmms_xform_metadata_get_int (xmms_xform_t *xform, const gchar *key,
 gboolean xmms_xform_metadata_get_str (xmms_xform_t *xform, const gchar *key,
                                       const gchar **val);
 
+
+gboolean xmms_xform_volatile_metadata_set_int (xmms_xform_t *xform, const gchar *key,
+                                               int val);
+gboolean xmms_xform_volatile_metadata_set_str (xmms_xform_t *xform, const gchar *key,
+                                               const char *val);
+gboolean xmms_xform_volatile_metadata_has_val (xmms_xform_t *xform, const gchar *key);
+gboolean xmms_xform_volatile_metadata_get_int (xmms_xform_t *xform, const gchar *key,
+                                               gint *val);
+gboolean xmms_xform_volatile_metadata_get_str (xmms_xform_t *xform, const gchar *key,
+                                               const gchar **val);
+
+void xmms_xform_current_metadata_get (xmms_xform_t *xform, xmmsv_t **info);
+
+
 /**
  * Set numeric metadata for the media by parsing a string value.
  *

@@ -124,6 +124,7 @@ xmms_metadata_test_xform_init (xmms_xform_t *xform)
 	const gchar *musicbrainz_va_id = "89ad4ac3-39f7-470e-963a-56509c546377";
 	const gchar *title, *rpgain;
 	gint track, totaltracks, compilation;
+	xmmsv_t *info;
 
 	CU_ASSERT_FALSE (xmms_xform_metadata_mapper_match (xform, "missing", "missing", -1));
 
@@ -167,10 +168,18 @@ xmms_metadata_test_xform_init (xmms_xform_t *xform)
 	CU_ASSERT_TRUE (xmms_xform_metadata_get_str (xform, XMMS_MEDIALIB_ENTRY_PROPERTY_GAIN_TRACK, &rpgain));
 	CU_ASSERT_STRING_EQUAL ("0.18428", rpgain);
 
-
 	CU_ASSERT_TRUE (xmms_xform_metadata_mapper_match (xform, "coverart", "test", 10));
 
+	xmms_xform_current_metadata_get (xform, &info);
+	CU_ASSERT_TRUE (xmmsv_is_type (info, XMMSV_TYPE_DICT));
+
+	CU_ASSERT_TRUE (xmms_xform_volatile_metadata_set_str (xform, "title", "the volatile title"));
+	CU_ASSERT_TRUE (xmms_xform_volatile_metadata_get_str (xform, XMMS_MEDIALIB_ENTRY_PROPERTY_TITLE, &title));
+	CU_ASSERT_STRING_EQUAL ("the volatile title", title);
+
 	xmms_xform_outdata_type_add (xform, XMMS_STREAM_TYPE_MIMETYPE, "audio/pcm", XMMS_STREAM_TYPE_END);
+
+	xmmsv_unref (info);
 
 	return TRUE;
 }

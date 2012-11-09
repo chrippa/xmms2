@@ -53,6 +53,8 @@ gboolean xmms_medialib_entry_property_set_int (xmms_medialib_session_t *s, xmms_
 gboolean xmms_medialib_entry_property_set_str (xmms_medialib_session_t *s, xmms_medialib_entry_t entry, const gchar *property, const gchar *value);
 gboolean xmms_medialib_entry_property_set_int_source (xmms_medialib_session_t *s, xmms_medialib_entry_t entry, const gchar *property, gint value, const gchar *source);
 gboolean xmms_medialib_entry_property_set_str_source (xmms_medialib_session_t *s, xmms_medialib_entry_t entry, const gchar *property, const gchar *value, const gchar *source);
+xmmsv_t *xmms_medialib_entry_to_tree (xmms_medialib_session_t *session, xmms_medialib_entry_t entry);
+
 
 gchar *xmms_medialib_url_encode (const gchar *path);
 gboolean xmms_medialib_decode_url (char *url);

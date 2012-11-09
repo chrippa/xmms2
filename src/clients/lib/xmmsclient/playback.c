@@ -184,6 +184,30 @@ xmmsc_playback_current_id (xmmsc_connection_t *c)
 }
 
 /**
+ * Request the current metadata broadcast. This will be called then the
+ * current playing entry's metadata is changed. New song for example.
+ */
+xmmsc_result_t *
+xmmsc_broadcast_playback_current_info (xmmsc_connection_t *c)
+{
+	x_check_conn (c, NULL);
+
+	return xmmsc_send_broadcast_msg (c, XMMS_IPC_SIGNAL_PLAYBACK_METADATA);
+}
+
+/**
+ * Make server emit the current entry's metadata.
+ */
+xmmsc_result_t *
+xmmsc_playback_current_info (xmmsc_connection_t *c)
+{
+	x_check_conn (c, NULL);
+
+	return xmmsc_send_msg_no_arg (c, XMMS_IPC_OBJECT_PLAYBACK,
+	                              XMMS_IPC_CMD_CMETADATA);
+}
+
+/**
  * Request the playback_playtime signal. Will update the
  * time we have played the current entry.
  */

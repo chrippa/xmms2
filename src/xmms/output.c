@@ -55,6 +55,7 @@ static void xmms_playback_client_seek_ms (xmms_output_t *output, gint32 ms, gint
 static void xmms_playback_client_seek_samples (xmms_output_t *output, gint32 samples, gint32 whence, xmms_error_t *error);
 static gint32 xmms_playback_client_status (xmms_output_t *output, xmms_error_t *error);
 static gint xmms_playback_client_current_id (xmms_output_t *output, xmms_error_t *error);
+static xmmsv_t *xmms_playback_client_current_info (xmms_output_t *output, xmms_error_t *err);
 static gint32 xmms_playback_client_playtime (xmms_output_t *output, xmms_error_t *err);
 
 typedef enum xmms_output_filler_state_E {
@@ -80,6 +81,7 @@ static gboolean set_plugin (xmms_output_t *output, xmms_output_plugin_t *plugin)
 static void xmms_output_format_list_free_elem (gpointer data, gpointer user_data);
 static void xmms_output_format_list_clear (xmms_output_t *output);
 xmms_medialib_entry_t xmms_output_current_id (xmms_output_t *output);
+static xmmsv_t *xmms_output_current_info (xmms_output_t *output);
 
 #include "output_ipc.c"
 
@@ -138,6 +140,9 @@ struct xmms_output_St {
 	/** Active format */
 	xmms_stream_type_t *format;
 
+	/** Active chain */
+	xmms_xform_t *chain;
+
 	/**
 	 * Number of bytes totaly written to output driver,
 	 * this is only for statistics...
@@ -151,6 +156,9 @@ struct xmms_output_St {
 
 	GThread *monitor_volume_thread;
 	gboolean monitor_volume_running;
+
+	/* Metadata for the currently playing entry */
+	xmmsv_t *metadata;
 };
 
 /** @} */
@@ -251,6 +259,114 @@ update_playtime (xmms_output_t *output, int advance)
 
 }
 
+static void
+update_metadata (xmms_output_t *output, xmmsv_t *_metadata)
+{
+	xmmsv_t *metadata;
+
+	if (output->metadata) {
+		xmmsv_unref (output->metadata);
+		output->metadata = NULL;
+	}
+
+	xmmsv_ref (_metadata);
+	output->metadata = _metadata;
+	metadata = xmms_output_current_info (output);
+
+	xmms_object_emit (XMMS_OBJECT (output),
+	                  XMMS_IPC_SIGNAL_PLAYBACK_METADATA,
+	                  metadata);
+}
+
+static void
+update_dict (xmmsv_t *source, xmmsv_t *target)
+{
+	xmmsv_dict_iter_t *it;
+
+	xmmsv_get_dict_iter (source, &it);
+
+	while (xmmsv_dict_iter_valid (it)) {
+		const gchar *key;
+		xmmsv_t *entry, *tentry;
+
+		xmmsv_dict_iter_pair (it, &key, &entry);
+
+		if (xmmsv_dict_get (target, key, &tentry)) {
+			if (xmmsv_is_type (entry, XMMSV_TYPE_DICT) &&
+			    xmmsv_is_type (tentry, XMMSV_TYPE_DICT)) {
+
+				update_dict (entry, tentry);
+			} else {
+				xmmsv_dict_set (target, key, entry);
+			}
+		} else {
+			xmmsv_dict_set (target, key, entry);
+		}
+
+		xmmsv_dict_iter_next (it);
+	}
+
+	xmmsv_dict_iter_explicit_destroy (it);
+}
+
+static xmmsv_t *
+xmms_output_current_info (xmms_output_t *output)
+{
+	xmms_medialib_session_t *session;
+	xmmsv_t *ret = NULL;
+
+	do {
+		session = xmms_medialib_session_begin_ro (output->medialib);
+		if (xmms_medialib_check_id (session, output->current_entry)) {
+			ret = xmms_medialib_entry_to_tree (session, output->current_entry);
+		}
+	} while (!xmms_medialib_session_commit (session));
+
+	if (output->metadata) {
+		if (ret) {
+			update_dict (output->metadata, ret);
+		} else {
+			xmmsv_ref (output->metadata);
+			ret = output->metadata;
+		}
+	}
+
+	return ret;
+}
+
+static void
+medialib_entry_updated (xmms_object_t *object, xmmsv_t *data, gpointer userdata)
+{
+	xmms_medialib_entry_t id;
+	xmms_output_t *output;
+	xmmsv_t *metadata;
+
+	if (!xmmsv_get_int (data, &id))
+		return;
+
+	output = (xmms_output_t *) userdata;
+
+	if (id != output->current_entry)
+		return;
+
+	metadata = xmms_output_current_info (output);
+
+	if (metadata) {
+		xmms_object_emit (XMMS_OBJECT (output),
+		                  XMMS_IPC_SIGNAL_PLAYBACK_METADATA,
+		                  metadata);
+	}
+}
+
+static void
+xform_metadata_updated (xmms_object_t *object, xmmsv_t *data, gpointer userdata)
+{
+	xmms_output_t *output;
+
+	output = (xmms_output_t *) userdata;
+	update_metadata (output, data);
+}
+
 void
 xmms_output_set_error (xmms_output_t *output, xmms_error_t *error)
 {
@@ -286,6 +402,7 @@ song_changed (void *data)
 	xmms_output_song_changed_arg_t *arg = (xmms_output_song_changed_arg_t *)data;
 	xmms_medialib_entry_t entry;
 	xmms_stream_type_t *type;
+	xmmsv_t *metadata;
 
 	entry = xmms_xform_entry_get (arg->chain);
 
@@ -313,6 +430,10 @@ song_changed (void *data)
 
 	if (arg->flush)
 		xmms_output_flush (arg->output);
+
+	xmms_xform_current_metadata_get (arg->chain, &metadata);
+	update_metadata (arg->output, metadata);
+	xmmsv_unref (metadata);
 
 	xmms_object_emit (XMMS_OBJECT (arg->output),
 	                  XMMS_IPC_SIGNAL_PLAYBACK_CURRENTID,
@@ -369,7 +490,7 @@ static void *
 xmms_output_filler (void *arg)
 {
 	xmms_output_t *output = (xmms_output_t *)arg;
-	xmms_xform_t *chain = NULL;
+	xmms_xform_t *xform;
 	gboolean last_was_kill = FALSE;
 	char buf[4096];
 	xmms_error_t err;
@@ -379,12 +500,14 @@ xmms_output_filler (void *arg)
 
 	xmms_set_thread_name ("x2 out filler");
 
+	output->chain = NULL;
+
 	g_mutex_lock (output->filler_mutex);
 	while (output->filler_state != FILLER_QUIT) {
 		if (output->filler_state == FILLER_STOP) {
-			if (chain) {
-				xmms_object_unref (chain);
-				chain = NULL;
+			if (output->chain) {
+				xmms_object_unref (output->chain);
+				output->chain = NULL;
 			}
 			xmms_ringbuf_set_eos (output->filler_buffer, TRUE);
 			g_cond_wait (output->filler_state_cond, output->filler_mutex);
@@ -392,9 +515,9 @@ xmms_output_filler (void *arg)
 			continue;
 		}
 		if (output->filler_state == FILLER_KILL) {
-			if (chain) {
-				xmms_object_unref (chain);
-				chain = NULL;
+			if (output->chain) {
+				xmms_object_unref (output->chain);
+				output->chain = NULL;
 				output->filler_state = FILLER_RUN;
 				last_was_kill = TRUE;
 			} else {
@@ -403,13 +526,13 @@ xmms_output_filler (void *arg)
 			continue;
 		}
 		if (output->filler_state == FILLER_SEEK) {
-			if (!chain) {
+			if (!output->chain) {
 				XMMS_DBG ("Seek without chain, ignoring..");
 				output->filler_state = FILLER_STOP;
 				continue;
 			}
 
-			ret = xmms_xform_this_seek (chain, output->filler_seek, XMMS_XFORM_SEEK_SET, &err);
+			ret = xmms_xform_this_seek (output->chain, output->filler_seek, XMMS_XFORM_SEEK_SET, &err);
 			if (ret == -1) {
 				XMMS_DBG ("Seeking failed: %s", xmms_error_message_get (&err));
 			} else {
@@ -430,7 +553,7 @@ xmms_output_filler (void *arg)
 			output->filler_state = FILLER_RUN;
 		}
 
-		if (!chain) {
+		if (!output->chain) {
 			xmms_medialib_entry_t entry;
 			xmms_output_song_changed_arg_t *hsarg;
 
@@ -444,8 +567,8 @@ xmms_output_filler (void *arg)
 				continue;
 			}
 
-			chain = xmms_xform_chain_setup (output->medialib, entry, output->format_list, FALSE);
-			if (!chain) {
+			output->chain = xmms_xform_chain_setup (output->medialib, entry, output->format_list, FALSE);
+			if (!output->chain) {
 				xmms_medialib_session_t *session;
 
 				do {
@@ -465,11 +588,19 @@ xmms_output_filler (void *arg)
 				continue;
 			}
 
+			for (xform = output->chain; xform; xform = xmms_xform_chain_prev (xform)) {
+				xmms_object_connect (XMMS_OBJECT (xform),
+				                     XMMS_IPC_SIGNAL_XFORM_METADATA_UPDATE,
+				                     (xmms_object_handler_t) xform_metadata_updated,
+				                     output);
+
+			}
+
 			hsarg = g_new0 (xmms_output_song_changed_arg_t, 1);
 			hsarg->output = output;
-			hsarg->chain = chain;
+			hsarg->chain = output->chain;
 			hsarg->flush = last_was_kill;
-			xmms_object_ref (chain);
+			xmms_object_ref (output->chain);
 
 			last_was_kill = FALSE;
 
@@ -485,7 +616,7 @@ xmms_output_filler (void *arg)
 		}
 		g_mutex_unlock (output->filler_mutex);
 
-		ret = xmms_xform_this_read (chain, buf, sizeof (buf), &err);
+		ret = xmms_xform_this_read (output->chain, buf, sizeof (buf), &err);
 
 		g_mutex_lock (output->filler_mutex);
 
@@ -504,8 +635,8 @@ xmms_output_filler (void *arg)
 				/* print error */
 				xmms_error_reset (&err);
 			}
-			xmms_object_unref (chain);
-			chain = NULL;
+			xmms_object_unref (output->chain);
+			output->chain = NULL;
 			if (!xmms_playlist_advance (output->playlist)) {
 				XMMS_DBG ("End of playlist");
 				output->filler_state = FILLER_STOP;
@@ -514,8 +645,8 @@ xmms_output_filler (void *arg)
 
 	}
 
-	if (chain)
-		xmms_object_unref (chain);
+	if (output->chain)
+		xmms_object_unref (output->chain);
 
 	g_mutex_unlock (output->filler_mutex);
 
@@ -786,6 +917,23 @@ xmms_playback_client_playtime (xmms_output_t *output, xmms_error_t *error)
 	return ret;
 }
 
+/**
+ * Get the metadata for the currently playing song.
+ */
+static xmmsv_t *
+xmms_playback_client_current_info (xmms_output_t *output, xmms_error_t *error)
+{
+	xmmsv_t *ret;
+
+	ret = xmms_output_current_info (output);
+
+	if (!ret) {
+		xmms_error_set (error, XMMS_ERROR_NOENT, "No song is currently playing");
+	}
+
+	return ret;
+}
+
 /* returns the current latency: time left in ms until the data currently read
  *                              from the latest xform in the chain will actually be played
  */
@@ -874,6 +1022,14 @@ xmms_output_destroy (xmms_object_t *object)
 		xmms_object_unref (output->plugin);
 	}
 	xmms_output_format_list_clear (output);
+
+	if (output->metadata)
+		xmmsv_unref (output->metadata);
+
+	xmms_object_disconnect (XMMS_OBJECT (output->medialib),
+	                        XMMS_IPC_SIGNAL_MEDIALIB_ENTRY_UPDATE,
+	                        (xmms_object_handler_t) medialib_entry_updated,
+	                        output);
 
 	xmms_object_unref (output->playlist);
 	xmms_object_unref (output->medialib);
@@ -966,6 +1122,7 @@ xmms_output_new (xmms_output_plugin_t *plugin, xmms_playlist_t *playlist, xmms_m
 
 	xmms_playback_register_ipc_commands (XMMS_OBJECT (output));
 
+	output->metadata = NULL;
 	output->status = XMMS_PLAYBACK_STATUS_STOP;
 
 	if (plugin) {
@@ -976,7 +1133,10 @@ xmms_output_new (xmms_output_plugin_t *plugin, xmms_playlist_t *playlist, xmms_m
 		xmms_log_error ("initalized output without a plugin, please fix!");
 	}
 
-
+	xmms_object_connect (XMMS_OBJECT (output->medialib),
+	                     XMMS_IPC_SIGNAL_MEDIALIB_ENTRY_UPDATE,
+	                     (xmms_object_handler_t) medialib_entry_updated,
+	                     output);
 
 	return output;
 }

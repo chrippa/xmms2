@@ -813,6 +813,23 @@ vim:expandtab
         </method>
 
         <method>
+            <name>current_info</name>
+            <documentation>Retrieves information about the currently playing song.</documentation>
+
+            <return_value>
+                <documentation>The information about the currently playing song.</documentation>
+
+                <type>
+                    <dictionary>
+                        <dictionary>
+                            <unknown />
+                        </dictionary>
+                    </dictionary>
+                </type>
+            </return_value>
+        </method>
+
+        <method>
             <name>volume_set</name>
             <documentation>Changes the volume for the given channel.</documentation>
 
@@ -891,6 +908,24 @@ vim:expandtab
 
                 <type>
                     <int />
+                </type>
+            </return_value>
+        </broadcast>
+
+        <broadcast>
+            <id>15</id>
+            <name>current_info</name>
+            <documentation>This broadcast is triggered when the played song's metadata changes.</documentation>
+
+            <return_value>
+                <documentation>The currently played song's metadata.</documentation>
+
+                <type>
+                    <dictionary>
+                        <dictionary>
+                            <unknown />
+                        </dictionary>
+                    </dictionary>
                 </type>
             </return_value>
         </broadcast>

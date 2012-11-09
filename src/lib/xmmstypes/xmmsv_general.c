@@ -29,6 +29,7 @@
 const char *xmmsv_default_source_pref[] = {
 	"server",
 	"client/*",
+	"volatile/*",
 	"plugin/playlist",
 	"plugin/id3v2",
 	"plugin/segment",

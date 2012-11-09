@@ -956,7 +956,7 @@ xmms_medialib_tree_add_tuple (xmmsv_t *dict, const char *key,
  * make sure to free them all.
  */
 
-static xmmsv_t *
+xmmsv_t *
 xmms_medialib_entry_to_tree (xmms_medialib_session_t *session,
                              xmms_medialib_entry_t entry)
 {
