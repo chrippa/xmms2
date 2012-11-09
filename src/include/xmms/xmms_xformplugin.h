@@ -281,6 +281,9 @@ gboolean xmms_xform_volatile_metadata_get_str (xmms_xform_t *xform, const gchar 
 
 void xmms_xform_current_metadata_get (xmms_xform_t *xform, xmmsv_t **info);
 
+void xmms_xform_playback_position_set (xmms_xform_t *xform, guint position);
+void xmms_xform_playback_position_callback_set (xmms_xform_t *xform, xmms_object_handler_t cb,
+                                                gpointer userdata);
 
 /**
  * Set numeric metadata for the media by parsing a string value.

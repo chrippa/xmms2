@@ -57,6 +57,7 @@ static gint32 xmms_playback_client_status (xmms_output_t *output, xmms_error_t *
 static gint xmms_playback_client_current_id (xmms_output_t *output, xmms_error_t *error);
 static xmmsv_t *xmms_playback_client_current_info (xmms_output_t *output, xmms_error_t *err);
 static gint32 xmms_playback_client_playtime (xmms_output_t *output, xmms_error_t *err);
+static gint32 xmms_playback_client_position (xmms_output_t *output, xmms_error_t *error);
 
 typedef enum xmms_output_filler_state_E {
 	FILLER_STOP,
@@ -82,6 +83,8 @@ static void xmms_output_format_list_free_elem (gpointer data, gpointer user_data
 static void xmms_output_format_list_clear (xmms_output_t *output);
 xmms_medialib_entry_t xmms_output_current_id (xmms_output_t *output);
 static xmmsv_t *xmms_output_current_info (xmms_output_t *output);
+static void update_playback_position (xmms_output_t *output, guint position);
+
 
 #include "output_ipc.c"
 
@@ -113,6 +116,8 @@ struct xmms_output_St {
 	GMutex *playtime_mutex;
 	guint played;
 	guint played_time;
+	guint playback_position;
+	gboolean playback_position_overwritten;
 	xmms_medialib_entry_t current_entry;
 	guint toskip;
 
@@ -250,6 +255,10 @@ update_playtime (xmms_output_t *output, int advance)
 			xmms_object_emit (XMMS_OBJECT (output),
 			                  XMMS_IPC_SIGNAL_PLAYBACK_PLAYTIME,
 			                  xmmsv_new_int (ms));
+
+			if (!output->playback_position_overwritten) {
+				update_playback_position (output, ms);
+			}
 		}
 		output->played_time = ms;
 
@@ -276,6 +285,28 @@ update_metadata (xmms_output_t *output, xmmsv_t *_metadata)
 	xmms_object_emit (XMMS_OBJECT (output),
 	                  XMMS_IPC_SIGNAL_PLAYBACK_METADATA,
 	                  metadata);
+}
+
+static void
+update_playback_position (xmms_output_t *output, guint position)
+{
+	xmms_xform_t *xform;
+
+	if (output->playback_position != position) {
+		xmms_object_emit (XMMS_OBJECT (output),
+		                  XMMS_IPC_SIGNAL_PLAYBACK_POSITION,
+		                  xmmsv_new_int (position));
+
+		if (output->chain) {
+			for (xform = output->chain; xform; xform = xmms_xform_chain_prev (xform)) {
+				xmms_object_emit (XMMS_OBJECT (xform),
+				                  XMMS_IPC_SIGNAL_PLAYBACK_POSITION,
+				                  xmmsv_new_int (position));
+			}
+		}
+	}
+
+	output->playback_position = position;
 }
 
 static void
@@ -365,6 +396,20 @@ xform_metadata_updated (xmms_object_t *object, xmmsv_t *data, gpointer userdata)
 
 	output = (xmms_output_t *) userdata;
 	update_metadata (output, data);
+}
+
+static void
+xform_playback_position_updated (xmms_object_t *object, xmmsv_t *data, gpointer userdata)
+{
+	xmms_output_t *output;
+	gint position;
+
+	output = (xmms_output_t *) userdata;
+
+	if (xmmsv_get_int (data, &position)) {
+		output->playback_position_overwritten = TRUE;
+		update_playback_position (output, position);
+	}
 }
 
 void
@@ -568,6 +613,7 @@ xmms_output_filler (void *arg)
 			}
 
 			output->chain = xmms_xform_chain_setup (output->medialib, entry, output->format_list, FALSE);
+			output->playback_position_overwritten = FALSE;
 			if (!output->chain) {
 				xmms_medialib_session_t *session;
 
@@ -592,6 +638,11 @@ xmms_output_filler (void *arg)
 				xmms_object_connect (XMMS_OBJECT (xform),
 				                     XMMS_IPC_SIGNAL_XFORM_METADATA_UPDATE,
 				                     (xmms_object_handler_t) xform_metadata_updated,
+				                     output);
+
+				xmms_object_connect (XMMS_OBJECT (xform),
+				                     XMMS_IPC_SIGNAL_XFORM_PLAYBACK_POSITION,
+				                     (xmms_object_handler_t) xform_playback_position_updated,
 				                     output);
 
 			}
@@ -933,6 +984,21 @@ xmms_playback_client_current_info (xmms_output_t *output, xmms_error_t *error)
 
 	return ret;
 }
+
+/**
+ * Get the current playback position in milliseconds.
+ */
+static gint32
+xmms_playback_client_position (xmms_output_t *output, xmms_error_t *error)
+{
+	guint32 ret;
+	g_return_val_if_fail (output, 0);
+
+	ret = output->playback_position;
+
+	return ret;
+}
+
 
 /* returns the current latency: time left in ms until the data currently read
  *                              from the latest xform in the chain will actually be played

@@ -220,6 +220,18 @@ xmmsc_signal_playback_playtime (xmmsc_connection_t *c)
 }
 
 /**
+ * Request the playback_position signal. Will update the
+ * current playback position of the current entry.
+ */
+xmmsc_result_t *
+xmmsc_signal_playback_position (xmmsc_connection_t *c)
+{
+	x_check_conn (c, NULL);
+
+	return xmmsc_send_signal_msg (c, XMMS_IPC_SIGNAL_PLAYBACK_POSITION);
+}
+
+/**
  * Make server emit the current playtime.
  */
 xmmsc_result_t *
@@ -229,6 +241,18 @@ xmmsc_playback_playtime (xmmsc_connection_t *c)
 
 	return xmmsc_send_msg_no_arg (c, XMMS_IPC_OBJECT_PLAYBACK,
 	                              XMMS_IPC_CMD_CPLAYTIME);
+}
+
+/**
+ * Make server emit the current playback position.
+ */
+xmmsc_result_t *
+xmmsc_playback_position (xmmsc_connection_t *c)
+{
+	x_check_conn (c, NULL);
+
+	return xmmsc_send_msg_no_arg (c, XMMS_IPC_OBJECT_PLAYBACK,
+	                              XMMS_IPC_CMD_CPOSITION);
 }
 
 xmmsc_result_t *

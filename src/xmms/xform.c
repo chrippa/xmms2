@@ -927,6 +927,23 @@ xmms_xform_current_metadata_get (xmms_xform_t *xform, xmmsv_t **info)
 	*info = st.info;
 }
 
+void
+xmms_xform_playback_position_set (xmms_xform_t *xform, guint position)
+{
+	xmms_object_emit (XMMS_OBJECT (xform),
+	                  XMMS_IPC_SIGNAL_XFORM_PLAYBACK_POSITION,
+	                  xmmsv_new_int (position));
+}
+
+void
+xmms_xform_playback_position_callback_set (xmms_xform_t *xform, xmms_object_handler_t cb,
+                                           gpointer userdata)
+{
+	xmms_object_connect (XMMS_OBJECT (xform),
+	                     XMMS_IPC_SIGNAL_PLAYBACK_POSITION,
+	                     (xmms_object_handler_t) cb, userdata);
+}
+
 
 static void
 xmms_xform_auxdata_set_val (xmms_xform_t *xform, char *key, xmmsv_t *val)

@@ -740,6 +740,19 @@ vim:expandtab
         </method>
 
         <method>
+            <name>position</name>
+            <documentation>Retrieves the playback position.</documentation>
+
+            <return_value>
+                <documentation>The current playback position.</documentation>
+
+                <type>
+                    <int />
+                </type>
+            </return_value>
+        </method>
+
+        <method>
             <name>seek_ms</name>
             <documentation>Seeks to a position in the currently played song (given in milliseconds).</documentation>
 
@@ -937,6 +950,20 @@ vim:expandtab
 
             <return_value>
                 <documentation>The current playtime.</documentation>
+
+                <type>
+                    <int />
+                </type>
+            </return_value>
+        </signal>
+
+        <signal>
+            <id>17</id>
+            <name>position</name>
+            <documentation>Emits the current playback position.</documentation>
+
+            <return_value>
+                <documentation>The current playback position.</documentation>
 
                 <type>
                     <int />
